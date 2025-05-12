@@ -21,12 +21,10 @@ signal_max = st.sidebar.number_input(
 
 # --- Data entry ---
 st.subheader("Add New Measurement")
-col1, col2 = st.columns(2)
-with col1:
-    new_time = st.number_input(
-        "Time (h):", value=0.0, step=0.1, format="%.2f"
-    )
-with col2:
+c1, c2 = st.columns(2)
+with c1:
+    new_time = st.number_input("Time (h):", value=0.0, step=0.1, format="%.2f")
+with c2:
     new_signal = st.number_input(
         "Signal:",
         min_value=signal_min,
@@ -51,96 +49,101 @@ edited_df = st.data_editor(
 )
 st.session_state.df = edited_df
 
-# --- Fit & plot when enough points are present ---
+# --- Only proceed when ≥5 points collected ---
 if len(st.session_state.df) >= 5:
     time_arr = st.session_state.df["Time"].values
     sig_arr = st.session_state.df["Signal"].values
 
-    # 5PL growth model (increasing S-shape)
-    def logistic_growth(x, A, D, C, B, G):
-        return D - (D - A) / ((1 + (x / C) ** B) ** G)
+    # Decide model: linear if no increase in the first 12 h
+    if time_arr.max() >= 12:
+        # restrict to times ≤12h
+        mask = time_arr <= 12
+        increased = sig_arr[mask].max() - sig_arr[mask].min() > 0
+        use_linear = not increased
+    else:
+        use_linear = False
 
-    # Initial parameter guesses
-    p0 = [
-        np.min(sig_arr),     # A: lower asymptote
-        np.max(sig_arr),     # D: upper asymptote
-        np.median(time_arr), # C: inflection
-        1.0,                  # B: slope
-        1.0,                  # G: asymmetry
-    ]
+    # Dual threshold input
+    st.subheader("Threshold Setting")
+    default_thr = float((signal_min + signal_max) / 2)
+    thr_num = st.number_input(
+        "Threshold (Signal) — enter value:",
+        min_value=signal_min,
+        max_value=signal_max,
+        value=default_thr,
+        step=(signal_max - signal_min) / 100,
+        format="%.2f",
+    )
+    thr_slider = st.slider(
+        "Threshold (Signal) — or drag slider:",
+        min_value=signal_min,
+        max_value=signal_max,
+        value=thr_num,
+        step=(signal_max - signal_min) / 100,
+    )
+    if thr_slider != thr_num:
+        thr_num = thr_slider
+    threshold = thr_num
 
-    st.subheader("5PL Fit & Prediction")
-    try:
-        popt, pcov = curve_fit(
-            logistic_growth,
+    st.subheader("Fit & Prediction")
+    if use_linear:
+        # --- Linear fallback ---
+        m, b = np.polyfit(time_arr, sig_arr, 1)
+        t_thresh = (threshold - b) / m if m != 0 else np.nan
+
+        st.metric("⚠️ No increase detected → Linear fit", f"Time-to-Threshold = {t_thresh:.2f} h")
+
+        # Plot linear
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.plot(time_arr, sig_arr, "ko", label="Data")
+        ax.plot(time_arr, m * time_arr + b, "b--", label="Linear Fit")
+        ax.axhline(threshold, color="green", linestyle="--", linewidth=1, label="Threshold")
+        ax.axvline(t_thresh, color="orange", linestyle="--", linewidth=1, label=f"Tt = {t_thresh:.2f} h")
+    else:
+        # --- 5PL growth fit with fixed asymptotes ---
+        A, D = signal_min, signal_max
+
+        def logistic_fixed(x, C, B, G):
+            return D - (D - A) / ((1 + (x / C) ** B) ** G)
+
+        # initial guesses for C, B, G
+        p0 = [np.median(time_arr), 1.0, 1.0]
+        popt, _ = curve_fit(
+            logistic_fixed,
             time_arr,
             sig_arr,
             p0=p0,
-            bounds=(
-                [signal_min, signal_min, 0, 0, 0],
-                [signal_max, signal_max, np.inf, np.inf, np.inf],
-            ),
+            bounds=([0, 0, 0], [np.inf, np.inf, np.inf]),
             maxfev=10000,
         )
-        A, D, C, B, G = popt
+        C_fit, B_fit, G_fit = popt
 
-        # Build smooth curve for plotting
+        # build smooth curve
         t_plot = np.linspace(time_arr.min(), time_arr.max(), 200)
-        y_plot = logistic_growth(t_plot, *popt)
+        y_plot = logistic_fixed(t_plot, *popt)
 
-        # --- Dual threshold inputs ---
-        default_thr = float((A + D) / 2)
-        threshold_num = st.number_input(
-            "Threshold (Signal) — enter a value:",
-            min_value=float(signal_min),
-            max_value=float(signal_max),
-            value=default_thr,
-            step=(signal_max - signal_min) / 100,
-            format="%.2f",
-        )
-        threshold_slider = st.slider(
-            "Threshold (Signal) — or drag the slider:",
-            min_value=float(signal_min),
-            max_value=float(signal_max),
-            value=threshold_num,
-            step=(signal_max - signal_min) / 100,
-        )
-        # Sync slider → number input
-        if threshold_slider != threshold_num:
-            threshold_num = threshold_slider
-        threshold = threshold_num
-
-        # Invert 5PL to get time-to-threshold
+        # invert for threshold
         def invert_5pl(y):
-            return C * (((D - A) / (D - y)) ** (1 / G) - 1) ** (1 / B)
+            return C_fit * (((D - A) / (D - y)) ** (1 / G_fit) - 1) ** (1 / B_fit)
 
         t_thresh = invert_5pl(threshold)
-        st.metric("⏱️ Predicted Time-to-Threshold (h)", f"{t_thresh:.2f}")
+        st.metric("🔵 5PL fit", f"Time-to-Threshold = {t_thresh:.2f} h")
 
-        # --- Plot ---
+        # Plot 5PL
         fig, ax = plt.subplots(figsize=(6, 6))
         ax.plot(time_arr, sig_arr, "ko", label="Data")
         ax.plot(t_plot, y_plot, "b-", label="5PL Fit")
-        ax.axhline(
-            threshold, color="green", linestyle="--", linewidth=1, label="Threshold"
-        )
-        ax.axvline(
-            t_thresh,
-            color="orange",
-            linestyle="--",
-            linewidth=1,
-            label=f"Tt = {t_thresh:.2f} h",
-        )
-        ax.set_xlim(time_arr.min(), time_arr.max())
-        ax.set_ylim(signal_min, signal_max)
-        ax.set_xlabel("Time (h)", fontweight="bold")
-        ax.set_ylabel("Signal", fontweight="bold")
-        ax.set_title("5PL Fit & Time-to-Threshold")
-        ax.legend()
-        st.pyplot(fig)
+        ax.axhline(threshold, color="green", linestyle="--", linewidth=1, label="Threshold")
+        ax.axvline(t_thresh, color="orange", linestyle="--", linewidth=1, label=f"Tt = {t_thresh:.2f} h")
 
-    except Exception as e:
-        st.error(f"❌ 5PL fit failed: {e}")
+    # finalize plot styling
+    ax.set_xlim(time_arr.min(), time_arr.max())
+    ax.set_ylim(signal_min, signal_max)
+    ax.set_xlabel("Time (h)", fontweight="bold")
+    ax.set_ylabel("Signal", fontweight="bold")
+    ax.set_title("Model Fit & Time-to-Threshold")
+    ax.legend()
+    st.pyplot(fig)
 
 # --- Download raw data as CSV ---
 csv = st.session_state.df.to_csv(index=False).encode("utf-8")
