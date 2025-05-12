@@ -11,19 +11,6 @@ import pickle
 st.set_page_config(layout="wide")
 st.title("⏱️ Real-Time Tt + logCFU/mL Calculator")
 
-# --- Session save/load ---
-SESSION_FILE = "saved_session.pkl"
-
-def save_session(data):
-    with open(SESSION_FILE, "wb") as f:
-        pickle.dump(data, f)
-
-def load_session():
-    if os.path.exists(SESSION_FILE):
-        with open(SESSION_FILE, "rb") as f:
-            return pickle.load(f)
-    return None
-
 # --- Sidebar Setup ---
 st.sidebar.title("Configuration")
 num_samples = st.sidebar.number_input("Number of samples", min_value=1, max_value=10, value=2)
