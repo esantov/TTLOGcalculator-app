@@ -1,79 +1,84 @@
 Real-Time Time-to-Threshold Calculator
 
-A Streamlit application for entering time and sensor signal data in real time and estimating the time needed to reach a desired threshold using a Five-Parameter Logistic (5PL) model.
+A Streamlit application for entering time and sensor signal data in real time and estimating the time required to reach a desired threshold using a Five-Parameter Logistic (5PL) model.
 
 Features
 
-Real-time data entry: Input time and sensor readings as they come in.
+Real-time data entry: Input time and sensor readings as they arrive.
 
-5PL Curve Fit: Automatically fits a 5PL model once you have ≥5 data points.
+5PL Curve Fitting: Automatically fits a 5PL model once you have 5 or more data points.
 
-Time-to-Threshold Prediction: Calculates and displays the estimated time to reach your specified threshold.
+Time-to-Threshold Prediction: Calculates and displays the estimated time to reach a specified threshold.
 
-Interactive Plot: Shows raw data (black circles), 5PL fit (blue solid line), 95% CI bands (red shaded area), threshold line (green dashed), and predicted Tt marker.
+Interactive Plot: Shows raw data (black circles), fitted curve (blue solid line), 95% CI bands (red shaded area), threshold line (green dashed), and predicted Tt marker.
 
-CSV Export: Download your collected dataset at any time.
+CSV Export: Download the collected dataset anytime.
 
-Getting Started (Local)
+Streamlit Cloud Deployment
 
-Prerequisites
+Prepare your GitHub repository:
 
-Python 3.7 or higher
+Ensure your app file is named streamlit_app.py (or update on Streamlit settings).
 
-Git (to clone the repo)
+Include a requirements.txt at the root listing all dependencies:
 
-Installation
+streamlit==1.30.0
+pandas==2.0.3
+numpy==1.25.2
+scipy==1.11.1
+matplotlib==3.8.0
 
-Clone the repository:
+Push your code to a public GitHub repository.
 
-git clone https://github.com/<your-username>/<repo-name>.git
-cd <repo-name>
+Navigate to Streamlit Community Cloud and sign in with GitHub.
 
-Create and activate a virtual environment:
+Click “New app”, select your repo, branch, and the path to streamlit_app.py.
 
-python3 -m venv venv
-source venv/bin/activate  # macOS/Linux
-# venv\Scripts\activate  # Windows
+Click “Deploy”. Your app will build and run at:
 
-Install dependencies:
+https://share.streamlit.io/<your-username>/<repo-name>/streamlit_app.py
+
+Troubleshooting Deployment Errors
+
+ModuleNotFoundError:
+
+In Manage App → Logs, look for ERROR: Could not find a version that satisfies the requirement ....
+
+Update your requirements.txt to include the missing package (e.g., scipy).
+
+Commit & push the change—Streamlit Cloud will rebuild with the corrected requirements.
+
+Build Failures:
+
+Confirm you can install your requirements locally:
 
 pip install -r requirements.txt
 
-Running Locally
+Fix any typos in package names or version incompatibilities.
 
-streamlit run real_time_ttt_app.py
-
-Open http://localhost:8501 in your browser.
-
-Deployment to Streamlit Community Cloud
-
-Push your code (including real_time_ttt_app.py and requirements.txt) to a public GitHub repository.
-
-Go to https://share.streamlit.io and sign in with your GitHub account.
-
-Click “New app”, select your GitHub repo, branch, and the path to real_time_ttt_app.py.
-
-Click “Deploy”. Your app will be live at https://share.streamlit.io/<username>/<repo>/<path>.
+Push updates until the build log shows successful Collecting ... and Installing collected packages steps.
 
 File Structure
 
-├── real_time_ttt_app.py    # Main Streamlit application
-├── requirements.txt        # Python dependencies
-└── README.md               # This file
+├── streamlit_app.py    # Main Streamlit application
+├── requirements.txt    # Python dependencies
+└── README.md           # This documentation
 
+Usage on Streamlit
 
+After deployment:
 
-Usage
+Open the app URL in your browser.
 
-Enter numerical Time and Signal values and click “Add Data Point”.
+Enter Time and Signal values, click “Add Data Point”.
 
-Once ≥5 points are in the table, the app fits a 5PL curve.
+Once at least 5 points are entered, the 5PL fit and Tt prediction appear.
 
-Set your Threshold. The plot updates with the threshold line and estimated Tt.
+Adjust Threshold as needed; the plot updates live.
 
-Download your data with the “Download Data as CSV” button.
+Download your data via the “Download Data as CSV” button.
 
 License
 
-This project is licensed under the MIT License.
+Distributed under the MIT License. See LICENSE for details.
 
