@@ -6,11 +6,17 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-# ―― Sidebar: global config ――
-st.sidebar.title("Global Configuration")
+# ―― Sidebar: Global Configuration ――
+st.sidebar.title("Configuration")
 num_samples = st.sidebar.number_input("Number of samples", min_value=1, max_value=10, value=2, step=1)
 
-# ―― Initialize session state ――
+# Calibration equation: logCFU = a * Tt + b
+st.sidebar.markdown("### Calibration: logCFU = a × Tt + b")
+use_calibration = st.sidebar.checkbox("Enable logCFU/mL calculation", value=False)
+a_coeff = st.sidebar.number_input("a (slope)", value=-0.45, format="%.4f")
+b_coeff = st.sidebar.number_input("b (intercept)", value=9.2, format="%.4f")
+
+# ―― Session state initialization ――
 if "samples" not in st.session_state or st.session_state.num_samples != num_samples:
     st.session_state.num_samples = num_samples
     st.session_state.samples = {}
@@ -23,12 +29,12 @@ if "samples" not in st.session_state or st.session_state.num_samples != num_samp
             "threshold": 50.0
         }
 
-st.title("⏱️ Real‐Time Time-to-Threshold for Multiple Samples")
+st.title("⏱️ Real-Time Time-to-Threshold + logCFU/mL Estimation")
 
-# ―― Loop over each sample ――
+# ―― Per-sample interface ――
 for sample_name, state in st.session_state.samples.items():
     with st.expander(sample_name, expanded=True):
-        # 1) Min / Max / Threshold config
+        # --- Min/Max/Threshold config ---
         c1, c2, c3 = st.columns(3)
         with c1:
             smin = st.number_input(f"{sample_name} Min", value=state["min"], format="%.2f", key=f"{sample_name}_min")
@@ -45,11 +51,11 @@ for sample_name, state in st.session_state.samples.items():
             )
         state["min"], state["max"], state["threshold"] = smin, smax, thr
 
-        # 2) Time/Signal input + add button
-        st.markdown("**Add new data point**")
+        # --- Add new Time & Signal row ---
+        st.markdown("**Add New Data Point**")
         t_col, y_col, btn_col = st.columns([1, 1, 1])
         with t_col:
-            new_time = st.number_input(f"{sample_name} Time (h)", value=0.0, format="%.2f", key=f"{sample_name}_time")
+            new_time = st.number_input(f"{sample_name} Time", value=0.0, format="%.2f", key=f"{sample_name}_time")
         with y_col:
             new_signal = st.number_input(
                 f"{sample_name} Signal",
@@ -64,8 +70,8 @@ for sample_name, state in st.session_state.samples.items():
                 new_row = {"Time": new_time, "Signal": new_signal}
                 state["df"] = pd.concat([state["df"], pd.DataFrame([new_row])], ignore_index=True)
 
-        # 3) Editable Table with index fix
-        st.markdown("**Time‐Signal Data** (editable)")
+        # --- Editable table ---
+        st.markdown("**Collected Data** (editable)")
         df = st.data_editor(
             state["df"],
             use_container_width=True,
@@ -75,10 +81,10 @@ for sample_name, state in st.session_state.samples.items():
         )
         state["df"] = df.reset_index(drop=True)
 
-        # 4) Fit & plot
+        # --- Fit and compute Tt if enough data ---
         clean = state["df"].dropna(subset=["Time", "Signal"])
         if len(clean) < 5:
-            st.warning(f"Need ≥5 data points to fit ({len(clean)} provided)")
+            st.warning("Enter at least 5 data points.")
             continue
 
         t_arr = clean["Time"].astype(float).values
@@ -89,7 +95,7 @@ for sample_name, state in st.session_state.samples.items():
         ax.plot(t_arr, y_arr, "ko", label="Data")
 
         if use_linear:
-            # Linear fit
+            # --- Linear fit ---
             m, b = np.polyfit(t_arr, y_arr, 1)
             y_fit = m * t_arr + b
             resid = y_arr - y_fit
@@ -103,7 +109,7 @@ for sample_name, state in st.session_state.samples.items():
             t_thresh = (thr - b) / m if m != 0 else np.nan
             st.metric("⚠️ Linear fallback", f"Tt = {t_thresh:.2f} h")
         else:
-            # 5PL fit
+            # --- 5PL fit ---
             A, D = smin, smax
 
             def five_pl(x, C, B, G):
@@ -125,6 +131,12 @@ for sample_name, state in st.session_state.samples.items():
             t_thresh = C_fit * (((D - A) / (D - thr)) ** (1 / G_fit) - 1) ** (1 / B_fit)
             st.metric("🔵 5PL fit", f"Tt = {t_thresh:.2f} h")
 
+        # Optional logCFU calculation
+        if use_calibration and not np.isnan(t_thresh):
+            logcfu = a_coeff * t_thresh + b_coeff
+            st.metric("🧪 logCFU/mL", f"{logcfu:.2f}")
+
+        # Plot styling
         ax.axhline(thr, color="green", linestyle="--", linewidth=1)
         ax.axvline(t_thresh, color="orange", linestyle="--", linewidth=1)
         ax.set_xlabel("Time (h)", fontweight="bold")
@@ -133,7 +145,7 @@ for sample_name, state in st.session_state.samples.items():
         ax.set_ylim(smin, smax)
         st.pyplot(fig)
 
-# ―― Download all data ――
+# ―― Export all data ――
 all_df = pd.concat(
     [st.session_state.samples[name]["df"].assign(Sample=name)
      for name in st.session_state.samples],
