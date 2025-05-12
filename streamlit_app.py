@@ -48,12 +48,13 @@ for sample_name, state in st.session_state.samples.items():
         # 2) Editable table, hide the index to prevent new index-column creation
         st.markdown("**Time‐Signal Data** (add/edit rows)")
         df = st.data_editor(
-            state["df"],
-            use_container_width=True,
-            num_rows="dynamic",
-            hide_index=True,
-            key=f"editor_{sample_name}"
-        )
+    state["df"],
+    use_container_width=True,
+    num_rows="dynamic",
+    hide_index=True,
+    key=f"editor_{sample_name}"
+)
+
         state["df"] = df
 
         # 3) Fit & plot once ≥5 points
