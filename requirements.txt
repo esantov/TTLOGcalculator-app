@@ -6,3 +6,4 @@ matplotlib==3.8.0
 google-auth
 google-auth-oauthlib
 google-api-python-client
+XlsxWriter
