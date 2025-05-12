@@ -10,6 +10,43 @@ import os
 import pickle
 from datetime import datetime
 
+SESSION_DIR = "sessions"
+os.makedirs(SESSION_DIR, exist_ok=True)
+
+def list_sessions():
+    return sorted([f for f in os.listdir(SESSION_DIR) if f.endswith(".pkl")], reverse=True)
+
+def load_session(name):
+    import pickle
+    path = os.path.join(SESSION_DIR, name)
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception as e:
+        st.error(f"Failed to load session: {e}")
+        return None
+
+# Always initialize
+if "samples" not in st.session_state:
+    st.session_state.samples = {}
+    last_session = list_sessions()[0] if list_sessions() else None
+    if last_session:
+        loaded = load_session(last_session)
+        if loaded:
+            st.session_state.samples = loaded
+        else:
+            st.warning("No valid session found. Starting fresh.")
+
+# If still empty, initialize sample slots
+if not st.session_state.samples:
+    for i in range(2):  # Default to 2 samples
+        name = f"Sample {i+1}"
+        st.session_state.samples[name] = {
+            "df": pd.DataFrame(columns=["Time", "Signal"]),
+            "min": 0.0, "max": 100.0, "threshold": 50.0,
+            "use_cal": False, "a": -0.45, "b": 9.2, "cal_name": ""
+        }
+
 # Setup
 st.set_page_config(layout="wide")
 SESSION_DIR = "sessions"
