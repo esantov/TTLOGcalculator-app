@@ -9,21 +9,46 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["Time", "Signal"])
 
 st.title("⏱️ Real-Time Time-to-Threshold Calculator")
-st.write("Enter each new (time, signal) measurement, or edit directly in the table below.")
+
+# --- Sensor signal range controls ---
+st.sidebar.subheader("Sensor Signal Range")
+signal_min = st.sidebar.number_input(
+    "Minimum signal",
+    value=0.0,
+    format="%.2f"
+)
+signal_max = st.sidebar.number_input(
+    "Maximum signal",
+    value=100.0,
+    format="%.2f"
+)
 
 # --- Data entry ---
+st.subheader("Add New Measurement")
 col1, col2 = st.columns(2)
 with col1:
-    new_time = st.number_input("Time (h):", value=0.0, step=0.1, format="%.2f")
+    new_time = st.number_input(
+        "Time (h):",
+        value=0.0,
+        step=0.1,
+        format="%.2f"
+    )
 with col2:
-    new_signal = st.number_input("Signal:", value=0.0, step=0.1, format="%.2f")
+    new_signal = st.number_input(
+        "Signal:",
+        value=np.clip(0.0, signal_min, signal_max),
+        min_value=signal_min,
+        max_value=signal_max,
+        step=0.1,
+        format="%.2f"
+    )
 
 if st.button("Add Data Point"):
     df = st.session_state.df
     df.loc[len(df)] = [new_time, new_signal]
     st.session_state.df = df
 
-# --- Show & edit collected data ---
+# --- Editable data table ---
 st.subheader("Collected Data (editable)")
 edited_df = st.data_editor(
     st.session_state.df,
@@ -31,15 +56,14 @@ edited_df = st.data_editor(
     use_container_width=True,
     key="data_editor"
 )
-# Sync edits back to session state
 st.session_state.df = edited_df
 
-# --- Only attempt fit if we have enough points ---
+# --- Fit & plot when enough points ---
 if len(st.session_state.df) >= 5:
     time_arr = st.session_state.df["Time"].values
     sig_arr  = st.session_state.df["Signal"].values
 
-    # 5PL growth function
+    # 5PL growth model
     def logistic_growth(x, A, D, C, B, G):
         return D - (D - A) / ((1 + (x / C) ** B) ** G)
 
@@ -47,25 +71,37 @@ if len(st.session_state.df) >= 5:
     p0 = [
         np.min(sig_arr),        # A: lower asymptote
         np.max(sig_arr),        # D: upper asymptote
-        np.median(time_arr),    # C: inflection
+        np.median(time_arr),    # C: inflection point
         1.0,                     # B: slope
         1.0                      # G: asymmetry
     ]
 
     st.subheader("5PL Fit & Prediction")
     try:
-        # Fit the 5PL model
-        popt, pcov = curve_fit(logistic_growth, time_arr, sig_arr, p0=p0, maxfev=10000)
+        popt, pcov = curve_fit(
+            logistic_growth,
+            time_arr,
+            sig_arr,
+            p0=p0,
+            bounds=([signal_min, signal_min, 0, 0, 0], [signal_max, signal_max, np.inf, np.inf, np.inf]),
+            maxfev=10000
+        )
         A, D, C, B, G = popt
 
         # Smooth curve for plotting
         t_plot = np.linspace(time_arr.min(), time_arr.max(), 200)
         y_plot = logistic_growth(t_plot, *popt)
 
-        # Threshold input
-        threshold = st.number_input("Threshold (Signal):", value=(A + D) / 2, step=0.1, format="%.2f")
+        # Threshold slider
+        threshold = st.slider(
+            "Threshold (Signal):",
+            min_value=float(signal_min),
+            max_value=float(signal_max),
+            value=float((A + D) / 2),
+            step=(signal_max - signal_min) / 100
+        )
 
-        # Invert 5PL to solve for time-to-threshold
+        # Invert 5PL to find time-to-threshold
         def invert_5pl(y):
             return C * (((D - A) / (D - y)) ** (1 / G) - 1) ** (1 / B)
 
@@ -74,12 +110,14 @@ if len(st.session_state.df) >= 5:
 
         # --- Plot ---
         fig, ax = plt.subplots(figsize=(6, 6))
-        ax.plot(time_arr, sig_arr, 'ko', label="Data")
-        ax.plot(t_plot, y_plot, 'b-', label="5PL Fit")
-        ax.axhline(threshold, color='green', linestyle='--', linewidth=1, label="Threshold")
-        ax.axvline(t_thresh, color='orange', linestyle='--', linewidth=1, label=f"Tt = {t_thresh:.2f} h")
-        ax.set_xlabel("Time (h)", fontweight='bold')
-        ax.set_ylabel("Signal", fontweight='bold')
+        ax.plot(time_arr, sig_arr, "ko", label="Data")
+        ax.plot(t_plot, y_plot, "b-", label="5PL Fit")
+        ax.axhline(threshold, color="green", linestyle="--", linewidth=1, label="Threshold")
+        ax.axvline(t_thresh, color="orange", linestyle="--", linewidth=1, label=f"Tt = {t_thresh:.2f} h")
+        ax.set_xlim(time_arr.min(), time_arr.max())
+        ax.set_ylim(signal_min, signal_max)
+        ax.set_xlabel("Time (h)", fontweight="bold")
+        ax.set_ylabel("Signal", fontweight="bold")
         ax.set_title("5PL Fit & Time-to-Threshold")
         ax.legend()
         st.pyplot(fig)
@@ -87,11 +125,12 @@ if len(st.session_state.df) >= 5:
     except Exception as e:
         st.error(f"❌ 5PL fit failed: {e}")
 
-# --- Download raw data ---
-csv = st.session_state.df.to_csv(index=False).encode('utf-8')
+# --- CSV download ---
+csv = st.session_state.df.to_csv(index=False).encode("utf-8")
 st.download_button(
     "📥 Download Collected Data as CSV",
     data=csv,
     file_name="real_time_data.csv",
     mime="text/csv"
 )
+
