@@ -85,10 +85,16 @@ for sample_name, state in st.session_state.samples.items():
                               value=state["threshold"], format="%.2f", key=f"{sample_name}_thr")
         state["min"], state["max"], state["threshold"] = smin, smax, thr
 
-        # Calibration
+        # Calibration (with safe defaults)
+        state.setdefault("use_cal", False)
+        state.setdefault("a", -0.45)
+        state.setdefault("b", 9.2)
+        state.setdefault("cal_name", "")
+
         st.markdown("### 🧪 Calibration")
         cal1, cal2, cal3 = st.columns([1, 1, 2])
         state["use_cal"] = st.checkbox("Use calibration", value=state["use_cal"], key=f"{sample_name}_cal")
+
         state["a"] = cal1.number_input("a", value=state["a"], format="%.4f", key=f"{sample_name}_a")
         state["b"] = cal2.number_input("b", value=state["b"], format="%.4f", key=f"{sample_name}_b")
         state["cal_name"] = cal3.text_input("Calibration name", value=state["cal_name"], key=f"{sample_name}_calname")
