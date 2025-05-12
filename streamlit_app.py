@@ -72,17 +72,17 @@ if thr_slider != thr_num:
     thr_num = thr_slider
 threshold = thr_num
 
-# --- Proceed if at least 5 time points and at least one non-empty sample ---
+# --- Prepare data for fitting ---
 df = st.session_state.df.copy()
 # drop rows where all sample columns are NaN
-sample_cols = df.columns.drop("Time")
+sample_cols = [col for col in df.columns if col != "Time"]
 has_data = df[sample_cols].notna().any(axis=1)
 df = df.loc[has_data]
 
+# --- Proceed if enough data ---
 if len(df) >= 5:
     time_arr = df["Time"].values
 
-    # Create tabs per sample
     tabs = st.tabs(sample_cols)
     for idx, sample in enumerate(sample_cols):
         with tabs[idx]:
@@ -103,6 +103,7 @@ if len(df) >= 5:
                 t_thresh = (threshold - b) / m if m != 0 else np.nan
                 st.metric("⚠️ Linear fallback (no rise ≤12h)",
                           f"Time-to-Threshold = {t_thresh:.2f} h")
+
                 # CI for linear
                 resid = sig - (m*time_arr + b)
                 s_err = np.sqrt(np.sum(resid**2)/(len(time_arr)-2))
@@ -111,15 +112,18 @@ if len(df) >= 5:
                     1/len(time_arr) + ((time_arr - time_arr.mean())**2)/np.sum((time_arr - time_arr.mean())**2))
                 ci_high = (m*time_arr + b) + tval*s_err*np.sqrt(
                     1/len(time_arr) + ((time_arr - time_arr.mean())**2)/np.sum((time_arr - time_arr.mean())**2))
+
                 fig, ax = plt.subplots(figsize=(6,6))
                 ax.plot(time_arr, sig, 'ko', label="Data")
                 ax.plot(time_arr, m*time_arr + b, 'b--', label="Linear Fit")
                 ax.fill_between(time_arr, ci_low, ci_high, color='r', alpha=0.2)
+
             else:
                 # --- 5PL with fixed asymptotes ---
                 A, D = signal_min, signal_max
                 def logistic_fixed(x, C, B, G):
                     return D - (D - A) / ((1 + (x/C)**B)**G)
+
                 p0 = [np.median(time_arr), 1.0, 1.0]
                 popt, _ = curve_fit(
                     logistic_fixed,
@@ -130,17 +134,20 @@ if len(df) >= 5:
                     maxfev=10000
                 )
                 C_fit, B_fit, G_fit = popt
+
                 t_plot = np.linspace(time_arr.min(), time_arr.max(), 200)
                 y_plot = logistic_fixed(t_plot, *popt)
-                # CI for 5PL (±1.96*sd of residuals)
+
                 resid = sig - logistic_fixed(time_arr, *popt)
                 s_err = np.std(resid)
                 ci_low = y_plot - 1.96*s_err
                 ci_high = y_plot + 1.96*s_err
+
                 def invert_5pl(y):
                     return C_fit * (((D - A)/(D - y))**(1/G_fit) - 1)**(1/B_fit)
                 t_thresh = invert_5pl(threshold)
                 st.metric("🔵 5PL fit", f"Time-to-Threshold = {t_thresh:.2f} h")
+
                 fig, ax = plt.subplots(figsize=(6,6))
                 ax.plot(time_arr, sig, 'ko', label="Data")
                 ax.plot(t_plot, y_plot, 'b-', label="5PL Fit")
