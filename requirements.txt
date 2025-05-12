@@ -3,3 +3,6 @@ pandas==2.0.3
 numpy==1.25.2
 scipy==1.11.1
 matplotlib==3.8.0
+google-auth
+google-auth-oauthlib
+google-api-python-client
