@@ -18,28 +18,6 @@ sample_names = []
 for i in range(1, num_samples + 1):
     sample_names.append(st.sidebar.text_input(f"Sample {i} name", value=f"Sample {i}", key=f"name_{i}"))
 
-# --- Auto-load session on app start ---
-if "samples" not in st.session_state:
-    restored = load_session()
-    if restored:
-        st.session_state.samples = restored
-        st.session_state.sample_count = len(restored)
-        st.sidebar.success("✅ Session auto-restored from file")
-    else:
-        st.session_state.samples = {}
-        st.session_state.sample_count = num_samples
-        for name in sample_names:
-            st.session_state.samples[name] = {
-                "df": pd.DataFrame(columns=["Time", "Signal"]),
-                "min": 0.0,
-                "max": 100.0,
-                "threshold": 50.0,
-                "use_cal": False,
-                "a": -0.45,
-                "b": 9.2,
-                "cal_name": ""
-            }
-
 # Sync sample names
 if len(sample_names) == len(st.session_state.samples):
     for i, new_name in enumerate(sample_names):
