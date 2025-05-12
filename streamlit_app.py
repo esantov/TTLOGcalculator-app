@@ -10,7 +10,7 @@ st.set_page_config(layout="wide")
 st.sidebar.title("Global Configuration")
 num_samples = st.sidebar.number_input("Number of samples", min_value=1, max_value=10, value=2, step=1)
 
-# ―― Initialize per-sample state ――
+# ―― Initialize session state ――
 if "samples" not in st.session_state or st.session_state.num_samples != num_samples:
     st.session_state.num_samples = num_samples
     st.session_state.samples = {}
@@ -28,7 +28,7 @@ st.title("⏱️ Real‐Time Time-to-Threshold for Multiple Samples")
 # ―― Loop over each sample ――
 for sample_name, state in st.session_state.samples.items():
     with st.expander(sample_name, expanded=True):
-        # 1) Per-sample min/max/threshold
+        # 1) Min / Max / Threshold config
         c1, c2, c3 = st.columns(3)
         with c1:
             smin = st.number_input(f"{sample_name} Min", value=state["min"], format="%.2f", key=f"{sample_name}_min")
@@ -45,8 +45,27 @@ for sample_name, state in st.session_state.samples.items():
             )
         state["min"], state["max"], state["threshold"] = smin, smax, thr
 
-        # 2) Editable table with hidden index and index reset fix
-        st.markdown("**Time‐Signal Data** (add/edit rows)")
+        # 2) Time/Signal input + add button
+        st.markdown("**Add new data point**")
+        t_col, y_col, btn_col = st.columns([1, 1, 1])
+        with t_col:
+            new_time = st.number_input(f"{sample_name} Time (h)", value=0.0, format="%.2f", key=f"{sample_name}_time")
+        with y_col:
+            new_signal = st.number_input(
+                f"{sample_name} Signal",
+                min_value=smin,
+                max_value=smax,
+                value=smin,
+                format="%.2f",
+                key=f"{sample_name}_signal"
+            )
+        with btn_col:
+            if st.button(f"➕ Add to {sample_name}", key=f"{sample_name}_add"):
+                new_row = {"Time": new_time, "Signal": new_signal}
+                state["df"] = pd.concat([state["df"], pd.DataFrame([new_row])], ignore_index=True)
+
+        # 3) Editable Table with index fix
+        st.markdown("**Time‐Signal Data** (editable)")
         df = st.data_editor(
             state["df"],
             use_container_width=True,
@@ -54,34 +73,28 @@ for sample_name, state in st.session_state.samples.items():
             hide_index=True,
             key=f"editor_{sample_name}"
         )
-
-        # ✅ FIX: reset index to avoid hidden column becoming data
         state["df"] = df.reset_index(drop=True)
 
-        # 3) Fit & plot once ≥5 points
+        # 4) Fit & plot
         clean = state["df"].dropna(subset=["Time", "Signal"])
         if len(clean) < 5:
-            st.warning(f"Need ≥5 points to fit ({len(clean)} present)")
+            st.warning(f"Need ≥5 data points to fit ({len(clean)} provided)")
             continue
 
         t_arr = clean["Time"].astype(float).values
         y_arr = clean["Signal"].astype(float).values
-
-        # Determine fit type
-        use_linear = (
-            t_arr.max() >= 12 and (y_arr[t_arr <= 12].max() - y_arr[t_arr <= 12].min() <= 0)
-        )
+        use_linear = t_arr.max() >= 12 and (y_arr[t_arr <= 12].max() - y_arr[t_arr <= 12].min() <= 0)
 
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.plot(t_arr, y_arr, "ko", label="Data")
 
         if use_linear:
-            # Linear fit + CI
+            # Linear fit
             m, b = np.polyfit(t_arr, y_arr, 1)
             y_fit = m * t_arr + b
             resid = y_arr - y_fit
             s_err = np.sqrt(np.sum(resid**2) / (len(t_arr) - 2))
-            tval = 2.262  # ~95% CI t-value
+            tval = 2.262
             ci = tval * s_err * np.sqrt(
                 1 / len(t_arr) + ((t_arr - t_arr.mean()) ** 2) / np.sum((t_arr - t_arr.mean()) ** 2)
             )
@@ -90,7 +103,7 @@ for sample_name, state in st.session_state.samples.items():
             t_thresh = (thr - b) / m if m != 0 else np.nan
             st.metric("⚠️ Linear fallback", f"Tt = {t_thresh:.2f} h")
         else:
-            # 5PL fixed-asymptote model
+            # 5PL fit
             A, D = smin, smax
 
             def five_pl(x, C, B, G):
@@ -107,15 +120,11 @@ for sample_name, state in st.session_state.samples.items():
             y_plot = five_pl(t_plot, *popt)
             resid = y_arr - five_pl(t_arr, *popt)
             s_err = np.std(resid)
-
             ax.plot(t_plot, y_plot, "b-", label="5PL Fit")
             ax.fill_between(t_plot, y_plot - 1.96 * s_err, y_plot + 1.96 * s_err, color="r", alpha=0.2)
-
-            # Inversion for threshold
             t_thresh = C_fit * (((D - A) / (D - thr)) ** (1 / G_fit) - 1) ** (1 / B_fit)
             st.metric("🔵 5PL fit", f"Tt = {t_thresh:.2f} h")
 
-        # Final plot styling
         ax.axhline(thr, color="green", linestyle="--", linewidth=1)
         ax.axvline(t_thresh, color="orange", linestyle="--", linewidth=1)
         ax.set_xlabel("Time (h)", fontweight="bold")
