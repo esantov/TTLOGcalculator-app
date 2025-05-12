@@ -41,7 +41,6 @@ summary_rows = []
 
 for sample_name, state in st.session_state.samples.items():
     with st.expander(sample_name, expanded=True):
-        # Min, Max, Threshold
         c1, c2, c3 = st.columns(3)
         smin = c1.number_input(f"{sample_name} Min", value=state["min"], format="%.2f", key=f"{sample_name}_min")
         smax = c2.number_input(f"{sample_name} Max", value=state["max"], format="%.2f", key=f"{sample_name}_max")
@@ -49,15 +48,18 @@ for sample_name, state in st.session_state.samples.items():
                               value=state["threshold"], format="%.2f", key=f"{sample_name}_thr")
         state["min"], state["max"], state["threshold"] = smin, smax, thr
 
-        # Calibration
+        state.setdefault("use_cal", False)
+        state.setdefault("a", -0.45)
+        state.setdefault("b", 9.2)
+        state.setdefault("cal_name", "")
+
         st.markdown("### 🧪 Calibration")
         cal1, cal2, cal3 = st.columns([1, 1, 2])
-        state["use_cal"] = st.checkbox("Use calibration", value=state.get("use_cal", False), key=f"{sample_name}_cal")
-        state["a"] = cal1.number_input("a", value=state.get("a", -0.45), format="%.4f", key=f"{sample_name}_a")
-        state["b"] = cal2.number_input("b", value=state.get("b", 9.2), format="%.4f", key=f"{sample_name}_b")
-        state["cal_name"] = cal3.text_input("Calibration name", value=state.get("cal_name", ""), key=f"{sample_name}_calname")
+        state["use_cal"] = st.checkbox("Use calibration", value=state["use_cal"], key=f"{sample_name}_cal")
+        state["a"] = cal1.number_input("a", value=state["a"], format="%.4f", key=f"{sample_name}_a")
+        state["b"] = cal2.number_input("b", value=state["b"], format="%.4f", key=f"{sample_name}_b")
+        state["cal_name"] = cal3.text_input("Calibration name", value=state["cal_name"], key=f"{sample_name}_calname")
 
-        # Data input
         st.markdown("### ➕ Add Data")
         c1, c2, c3 = st.columns([1, 1, 1])
         new_time = c1.number_input(f"{sample_name} Time", value=0.0, format="%.2f", key=f"{sample_name}_time")
@@ -72,14 +74,13 @@ for sample_name, state in st.session_state.samples.items():
                             key=f"editor_{sample_name}")
         state["df"] = df.reset_index(drop=True)
 
-        # Fitting
         clean = df.dropna(subset=["Time", "Signal"])
         if len(clean) < 5:
             st.warning("Need at least 5 points.")
             continue
 
-        t_arr = clean["Time"].values
-        y_arr = clean["Signal"].values
+        t_arr = clean["Time"].astype(float).values
+        y_arr = clean["Signal"].astype(float).values
         use_linear = t_arr.max() >= 12 and (y_arr[t_arr <= 12].max() - y_arr[t_arr <= 12].min() <= 0)
 
         fig, ax = plt.subplots(figsize=(6, 4))
@@ -146,7 +147,8 @@ with zipfile.ZipFile(zip_buffer, 'w') as zf:
     zf.writestr("summary_logCFU.csv", summary_df.to_csv(index=False))
     zf.writestr("raw_data.csv", raw_df.to_csv(index=False))
 
-    if not summary_df["logCFU/mL"].isnull().all():
+    # ✅ FIXED: check column exists
+    if "logCFU/mL" in summary_df.columns and not summary_df["logCFU/mL"].isnull().all():
         fig, ax = plt.subplots(figsize=(6, 4))
         valid = summary_df.dropna(subset=["logCFU/mL"])
         ax.bar(valid["Sample"], valid["logCFU/mL"], color="skyblue")
