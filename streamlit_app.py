@@ -5,8 +5,6 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 from io import BytesIO
 import zipfile
-import os
-import pickle
 
 st.set_page_config(layout="wide")
 st.title("⏱️ Real-Time Tt + logCFU/mL Calculator")
@@ -14,9 +12,22 @@ st.title("⏱️ Real-Time Tt + logCFU/mL Calculator")
 # --- Sidebar Setup ---
 st.sidebar.title("Configuration")
 num_samples = st.sidebar.number_input("Number of samples", min_value=1, max_value=10, value=2)
-sample_names = []
-for i in range(1, num_samples + 1):
-    sample_names.append(st.sidebar.text_input(f"Sample {i} name", value=f"Sample {i}", key=f"name_{i}"))
+sample_names = [st.sidebar.text_input(f"Sample {i+1} name", value=f"Sample {i+1}", key=f"name_{i}") for i in range(num_samples)]
+
+# --- Initialize session state ---
+if "samples" not in st.session_state:
+    st.session_state.samples = {}
+    for name in sample_names:
+        st.session_state.samples[name] = {
+            "df": pd.DataFrame(columns=["Time", "Signal"]),
+            "min": 0.0,
+            "max": 100.0,
+            "threshold": 50.0,
+            "use_cal": False,
+            "a": -0.45,
+            "b": 9.2,
+            "cal_name": ""
+        }
 
 # Sync sample names
 if len(sample_names) == len(st.session_state.samples):
@@ -25,24 +36,12 @@ if len(sample_names) == len(st.session_state.samples):
         if new_name != old_name:
             st.session_state.samples[new_name] = st.session_state.samples.pop(old_name)
 
-# --- Session Save/Load UI ---
-st.sidebar.markdown("---")
-if st.sidebar.button("💾 Save Session"):
-    save_session(st.session_state.samples)
-    st.sidebar.success("Session saved to file.")
-
-if st.sidebar.button("📂 Load Session"):
-    restored = load_session()
-    if restored:
-        st.session_state.samples = restored
-        st.sidebar.success("Session loaded.")
-
 # --- Per-sample Loop ---
 summary_rows = []
 
 for sample_name, state in st.session_state.samples.items():
     with st.expander(sample_name, expanded=True):
-        # Config
+        # Min, Max, Threshold
         c1, c2, c3 = st.columns(3)
         smin = c1.number_input(f"{sample_name} Min", value=state["min"], format="%.2f", key=f"{sample_name}_min")
         smax = c2.number_input(f"{sample_name} Max", value=state["max"], format="%.2f", key=f"{sample_name}_max")
@@ -50,19 +49,13 @@ for sample_name, state in st.session_state.samples.items():
                               value=state["threshold"], format="%.2f", key=f"{sample_name}_thr")
         state["min"], state["max"], state["threshold"] = smin, smax, thr
 
-        # Calibration (with safe defaults)
-        state.setdefault("use_cal", False)
-        state.setdefault("a", -0.45)
-        state.setdefault("b", 9.2)
-        state.setdefault("cal_name", "")
-
+        # Calibration
         st.markdown("### 🧪 Calibration")
         cal1, cal2, cal3 = st.columns([1, 1, 2])
-        state["use_cal"] = st.checkbox("Use calibration", value=state["use_cal"], key=f"{sample_name}_cal")
-
-        state["a"] = cal1.number_input("a", value=state["a"], format="%.4f", key=f"{sample_name}_a")
-        state["b"] = cal2.number_input("b", value=state["b"], format="%.4f", key=f"{sample_name}_b")
-        state["cal_name"] = cal3.text_input("Calibration name", value=state["cal_name"], key=f"{sample_name}_calname")
+        state["use_cal"] = st.checkbox("Use calibration", value=state.get("use_cal", False), key=f"{sample_name}_cal")
+        state["a"] = cal1.number_input("a", value=state.get("a", -0.45), format="%.4f", key=f"{sample_name}_a")
+        state["b"] = cal2.number_input("b", value=state.get("b", 9.2), format="%.4f", key=f"{sample_name}_b")
+        state["cal_name"] = cal3.text_input("Calibration name", value=state.get("cal_name", ""), key=f"{sample_name}_calname")
 
         # Data input
         st.markdown("### ➕ Add Data")
@@ -74,20 +67,19 @@ for sample_name, state in st.session_state.samples.items():
             row = {"Time": new_time, "Signal": new_signal}
             state["df"] = pd.concat([state["df"], pd.DataFrame([row])], ignore_index=True)
 
-        # Editable table
         st.markdown("### 📋 Data Table")
         df = st.data_editor(state["df"], hide_index=True, num_rows="dynamic", use_container_width=True,
                             key=f"editor_{sample_name}")
         state["df"] = df.reset_index(drop=True)
 
-        # Fit
+        # Fitting
         clean = df.dropna(subset=["Time", "Signal"])
         if len(clean) < 5:
             st.warning("Need at least 5 points.")
             continue
 
-        t_arr = clean["Time"].astype(float).values
-        y_arr = clean["Signal"].astype(float).values
+        t_arr = clean["Time"].values
+        y_arr = clean["Signal"].values
         use_linear = t_arr.max() >= 12 and (y_arr[t_arr <= 12].max() - y_arr[t_arr <= 12].min() <= 0)
 
         fig, ax = plt.subplots(figsize=(6, 4))
