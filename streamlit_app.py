@@ -6,11 +6,10 @@ import matplotlib.pyplot as plt
 
 # --- Initialize session state ---
 if "df" not in st.session_state:
-    # Store manual time/signal entries
     st.session_state.df = pd.DataFrame(columns=["Time", "Signal"])
 
 st.title("⏱️ Real-Time Time-to-Threshold Calculator")
-st.write("Enter each new (time, signal) measurement and see the 5PL fit & predicted time-to-threshold update in real time.")
+st.write("Enter each new (time, signal) measurement, or edit directly in the table below.")
 
 # --- Data entry ---
 col1, col2 = st.columns(2)
@@ -21,20 +20,26 @@ with col2:
 
 if st.button("Add Data Point"):
     df = st.session_state.df
-    # Add new row without using deprecated .append()
     df.loc[len(df)] = [new_time, new_signal]
     st.session_state.df = df
 
-# --- Show collected data ---
-st.subheader("Collected Data")
-st.dataframe(st.session_state.df)
+# --- Show & edit collected data ---
+st.subheader("Collected Data (editable)")
+edited_df = st.data_editor(
+    st.session_state.df,
+    num_rows="dynamic",
+    use_container_width=True,
+    key="data_editor"
+)
+# Sync edits back to session state
+st.session_state.df = edited_df
 
 # --- Only attempt fit if we have enough points ---
 if len(st.session_state.df) >= 5:
     time_arr = st.session_state.df["Time"].values
     sig_arr  = st.session_state.df["Signal"].values
 
-    # Define increasing 5PL (sigmoidal growth)
+    # 5PL growth function
     def logistic_growth(x, A, D, C, B, G):
         return D - (D - A) / ((1 + (x / C) ** B) ** G)
 
@@ -53,7 +58,7 @@ if len(st.session_state.df) >= 5:
         popt, pcov = curve_fit(logistic_growth, time_arr, sig_arr, p0=p0, maxfev=10000)
         A, D, C, B, G = popt
 
-        # Build a smooth curve for plotting
+        # Smooth curve for plotting
         t_plot = np.linspace(time_arr.min(), time_arr.max(), 200)
         y_plot = logistic_growth(t_plot, *popt)
 
@@ -69,19 +74,14 @@ if len(st.session_state.df) >= 5:
 
         # --- Plot ---
         fig, ax = plt.subplots(figsize=(6, 6))
-        # Raw data
         ax.plot(time_arr, sig_arr, 'ko', label="Data")
-        # 5PL fit curve
         ax.plot(t_plot, y_plot, 'b-', label="5PL Fit")
-        # Threshold line
         ax.axhline(threshold, color='green', linestyle='--', linewidth=1, label="Threshold")
-        # Predicted Tt vertical
         ax.axvline(t_thresh, color='orange', linestyle='--', linewidth=1, label=f"Tt = {t_thresh:.2f} h")
         ax.set_xlabel("Time (h)", fontweight='bold')
         ax.set_ylabel("Signal", fontweight='bold')
         ax.set_title("5PL Fit & Time-to-Threshold")
         ax.legend()
-
         st.pyplot(fig)
 
     except Exception as e:
