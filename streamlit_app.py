@@ -4,77 +4,94 @@ import numpy as np
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 
-# ---- Initialize session state for data storage ----
-if 'df' not in st.session_state:
-    st.session_state.df = pd.DataFrame(columns=['Time', 'Signal'])
+# --- Initialize session state ---
+if "df" not in st.session_state:
+    # Store manual time/signal entries
+    st.session_state.df = pd.DataFrame(columns=["Time", "Signal"])
 
-st.title('⏱️ Real-Time Time-to-Threshold Calculator')
-st.markdown('Enter time and sensor signal data points as they arrive to estimate the time to reach a given threshold using a 5PL fit.')
+st.title("⏱️ Real-Time Time-to-Threshold Calculator")
+st.write("Enter each new (time, signal) measurement and see the 5PL fit & predicted time-to-threshold update in real time.")
 
-# ---- User inputs for new data point ----
+# --- Data entry ---
 col1, col2 = st.columns(2)
 with col1:
-    new_time = st.number_input('Time', value=0.0, step=0.01, format="%.2f", key='input_time')
+    new_time = st.number_input("Time (h):", value=0.0, step=0.1, format="%.2f")
 with col2:
-    new_signal = st.number_input('Signal', value=0.0, step=0.01, format="%.2f", key='input_signal')
+    new_signal = st.number_input("Signal:", value=0.0, step=0.1, format="%.2f")
 
-if st.button('Add Data Point'):
-    # Append new row to DataFrame
-    st.session_state.df = st.session_state.df.append({'Time': new_time, 'Signal': new_signal}, ignore_index=True)
+if st.button("Add Data Point"):
+    df = st.session_state.df
+    # Add new row without using deprecated .append()
+    df.loc[len(df)] = [new_time, new_signal]
+    st.session_state.df = df
 
-# ---- Display current data ----
-st.subheader('Current Data')
+# --- Show collected data ---
+st.subheader("Collected Data")
 st.dataframe(st.session_state.df)
 
-# ---- Threshold setting ----nthreshold = st.number_input('Threshold', value=1.0, step=0.01, format="%.2f")
-
-# ---- Define 5PL model ----
-def logistic_5pl(x, A, D, C, B, G):
-    return D - (D - A) / ((1 + (x / C)**B)**G)
-
-def inverse_5pl(y, A, D, C, B, G):
-    # Solve for x in logistic_5pl(x) = y
-    ratio = (D - A) / (D - y)
-    base = ratio**(1/G) - 1
-    return C * (base)**(1/B)
-
-# ---- Perform fit and plot ----
+# --- Only attempt fit if we have enough points ---
 if len(st.session_state.df) >= 5:
-    time_vals = st.session_state.df['Time'].values
-    signal_vals = st.session_state.df['Signal'].values
+    time_arr = st.session_state.df["Time"].values
+    sig_arr  = st.session_state.df["Signal"].values
+
+    # Define increasing 5PL (sigmoidal growth)
+    def logistic_growth(x, A, D, C, B, G):
+        return D - (D - A) / ((1 + (x / C) ** B) ** G)
 
     # Initial parameter guesses
-    p0 = [min(signal_vals), max(signal_vals), np.median(time_vals), 1.0, 1.0]
+    p0 = [
+        np.min(sig_arr),        # A: lower asymptote
+        np.max(sig_arr),        # D: upper asymptote
+        np.median(time_arr),    # C: inflection
+        1.0,                     # B: slope
+        1.0                      # G: asymmetry
+    ]
+
+    st.subheader("5PL Fit & Prediction")
     try:
-        popt, pcov = curve_fit(logistic_5pl, time_vals, signal_vals, p0=p0, maxfev=10000)
+        # Fit the 5PL model
+        popt, pcov = curve_fit(logistic_growth, time_arr, sig_arr, p0=p0, maxfev=10000)
         A, D, C, B, G = popt
-        # Compute fitted curve
-        x_fit = np.linspace(time_vals.min(), time_vals.max(), 200)
-        y_fit = logistic_5pl(x_fit, *popt)
-        # Estimate time to threshold
-        t_thresh = inverse_5pl(threshold, *popt)
 
-        st.subheader('Fit & Prediction')
-        st.write(f'**Estimated time to threshold ({threshold}):** {t_thresh:.3f} (same units as time)')
+        # Build a smooth curve for plotting
+        t_plot = np.linspace(time_arr.min(), time_arr.max(), 200)
+        y_plot = logistic_growth(t_plot, *popt)
 
-        # Plot
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.plot(time_vals, signal_vals, 'ko', label='Data')
-        ax.plot(x_fit, y_fit, 'b-', label='5PL Fit')
-        ax.axhline(threshold, color='green', linestyle='--', label='Threshold')
-        ax.axvline(t_thresh, color='red', linestyle='--', label='Estimated Tt')
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Signal')
-        ax.set_title('Real-Time 5PL Fit & Time-to-Threshold')
+        # Threshold input
+        threshold = st.number_input("Threshold (Signal):", value=(A + D) / 2, step=0.1, format="%.2f")
+
+        # Invert 5PL to solve for time-to-threshold
+        def invert_5pl(y):
+            return C * (((D - A) / (D - y)) ** (1 / G) - 1) ** (1 / B)
+
+        t_thresh = invert_5pl(threshold)
+        st.metric("⏱️ Predicted Time-to-Threshold (h)", f"{t_thresh:.2f}")
+
+        # --- Plot ---
+        fig, ax = plt.subplots(figsize=(6, 6))
+        # Raw data
+        ax.plot(time_arr, sig_arr, 'ko', label="Data")
+        # 5PL fit curve
+        ax.plot(t_plot, y_plot, 'b-', label="5PL Fit")
+        # Threshold line
+        ax.axhline(threshold, color='green', linestyle='--', linewidth=1, label="Threshold")
+        # Predicted Tt vertical
+        ax.axvline(t_thresh, color='orange', linestyle='--', linewidth=1, label=f"Tt = {t_thresh:.2f} h")
+        ax.set_xlabel("Time (h)", fontweight='bold')
+        ax.set_ylabel("Signal", fontweight='bold')
+        ax.set_title("5PL Fit & Time-to-Threshold")
         ax.legend()
+
         st.pyplot(fig)
 
     except Exception as e:
-        st.error(f'⚠️ 5PL fit failed: {e}')
-else:
-    st.info('Enter at least 5 data points to perform a 5PL fit.')
+        st.error(f"❌ 5PL fit failed: {e}")
 
-# ---- Download current data ----
-if not st.session_state.df.empty:
-    csv = st.session_state.df.to_csv(index=False).encode()
-    st.download_button('Download Data as CSV', csv, file_name='rt_data.csv', mime='text/csv')
+# --- Download raw data ---
+csv = st.session_state.df.to_csv(index=False).encode('utf-8')
+st.download_button(
+    "📥 Download Collected Data as CSV",
+    data=csv,
+    file_name="real_time_data.csv",
+    mime="text/csv"
+)
